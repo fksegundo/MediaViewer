@@ -1,0 +1,53 @@
+## Build results
+[Dd]ebug/
+[Dd]ebugPublic/
+[Rr]elease/
+[Rr]eleasePublic/
+x64/
+x86/
+[Aa]rm/
+[Aa]rm64/
+bld/
+[Bb]in/
+[Oo]bj/
+[Ll]og/
+[Ll]ogs/
+
+## Visual Studio & VS Code
+.vs/
+*.user
+*.userosscache
+*.sln.docstates
+.vscode/
+
+## Environment & Secrets
+.env
+.env.*
+!.env.example
+*.key
+*.keystore
+*.p12
+*.pfx
+*.pem
+pair.json
+
+## Database & Local Data
+*.db
+*.db-shm
+*.db-wal
+server-data/
+
+## Devin CLI / Windsurf local configs
+.devin/
+.windsurf/
+
+## Packages
+*.nupkg
+*.snupkg
+**/packages/
+!**/packages/build/
+
+## OS generated files
+.DS_Store
+Thumbs.db
+desktop.ini

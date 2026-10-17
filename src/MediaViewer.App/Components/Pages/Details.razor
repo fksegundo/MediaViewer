@@ -1,0 +1,143 @@
+@page "/media/{Id:int}"
+@inject AppSettings Settings
+@inject ApiClient Api
+@inject NavigationManager Nav
+@inject TorrentService Torrents
+@inject DownloadStore Downloads
+
+@if (_item is null)
+{
+    <div class="loading">Carregando...</div>
+}
+else
+{
+    <div class="details">
+        <div class="backdrop" style="@(BackdropStyle)">
+            <button class="back" @onclick='() => Nav.NavigateTo("/")'>&larr;</button>
+        </div>
+
+        <div class="details-body">
+            <h1>@_item.Title</h1>
+            <p class="meta">@_item.Year @(_item.ContentRating is not null ? $"· {_item.ContentRating}" : "")</p>
+            <p class="overview">@_item.Overview</p>
+
+            @if (_item.Kind == MediaKind.Series)
+            {
+                <h2>Episódios</h2>
+                <div class="episodes">
+                    @foreach (var ep in _item.Episodes)
+                    {
+                        <div class="episode">
+                            <div class="ep-info">
+                                <span class="ep-title">@ep.Title</span>
+                                <span class="ep-overview">@ep.Overview</span>
+                            </div>
+                            <div class="ep-actions">
+                                <button class="btn-play" @onclick="() => Play(ep)">▶</button>
+                                <button class="btn-dl" @onclick="() => Download(ep)" disabled="@IsBusy(ep)">
+                                    @(IsBusy(ep) ? "…" : "⬇")
+                                </button>
+                            </div>
+                        </div>
+                    }
+                </div>
+            }
+            else
+            {
+                <div class="actions">
+                    <button class="btn-primary" @onclick="() => Play(_item)">▶ Assistir</button>
+                    <button class="btn-secondary" @onclick="() => Download(_item)" disabled="@IsBusy(_item)">
+                        @(IsBusy(_item) ? "Baixando..." : "⬇ Baixar")
+                    </button>
+                </div>
+            }
+        </div>
+    </div>
+}
+
+@code {
+    [Parameter] public int Id { get; set; }
+
+    private MediaItemDto? _item;
+    private readonly HashSet<int> _downloading = [];
+    private readonly HashSet<int> _downloaded = [];
+
+    private string BackdropStyle => _item?.BackdropUrl is not null
+        ? $"background-image: linear-gradient(to top, #141414, transparent), url('{_item.BackdropUrl}')"
+        : "";
+
+    protected override async Task OnInitializedAsync()
+    {
+        _item = await Api.GetMediaAsync(Id);
+        if (_item is null) return;
+
+        var all = _item.Kind == MediaKind.Series ? _item.Episodes : [_item];
+        foreach (var m in all)
+            foreach (var s in m.Sources)
+                if (await Downloads.FindAsync(s.Id) is not null)
+                    _downloaded.Add(s.Id);
+    }
+
+    private async Task Play(MediaItemDto item)
+    {
+        var source = item.Sources.FirstOrDefault();
+        if (source is null) return;
+
+        var downloaded = await Downloads.FindAsync(source.Id);
+        if (downloaded is not null)
+        {
+            Nav.NavigateTo($"/player/local/{source.Id}");
+            return;
+        }
+        Nav.NavigateTo($"/player/torrent/{source.Id}?magnet={Uri.EscapeDataString(source.Uri)}&fileIndex={source.FileIndex}&mediaId={item.Id}");
+        // URIs http(s) are direct media links — the player opens them without the torrent engine.
+    }
+
+    private bool IsBusy(MediaItemDto item)
+    {
+        var source = item.Sources.FirstOrDefault();
+        return source is not null && (_downloading.Contains(source.Id) || _downloaded.Contains(source.Id));
+    }
+
+    private async Task Download(MediaItemDto item)
+    {
+        var source = item.Sources.FirstOrDefault();
+        if (source is null || _downloading.Contains(source.Id)) return;
+
+        _downloading.Add(source.Id);
+        _ = Task.Run(async () =>
+        {
+            try
+            {
+                if (source.Uri.StartsWith("http", StringComparison.OrdinalIgnoreCase))
+                {
+                    var path = await DownloadStore.DownloadHttpAsync(source.Uri);
+                    var size = new FileInfo(path).Length;
+                    await Downloads.AddAsync(new DownloadStore.Entry(
+                        item.Id, source.Id, item.Title, item.PosterUrl,
+                        path, size, DateTime.UtcNow, source.Uri, null));
+                }
+                else
+                {
+                    var manager = await Torrents.StartDownloadAsync(source.Uri);
+                    var file = await Torrents.WaitForFileCompleteAsync(manager, source.FileIndex);
+                    await Downloads.AddAsync(new DownloadStore.Entry(
+                        item.Id, source.Id, item.Title, item.PosterUrl,
+                        file.DownloadCompleteFullPath, file.Length, DateTime.UtcNow,
+                        source.Uri, source.FileIndex));
+                }
+                _downloaded.Add(source.Id);
+            }
+            catch
+            {
+                // Download failed or was cancelled; the button becomes available again.
+            }
+            finally
+            {
+                _downloading.Remove(source.Id);
+                await InvokeAsync(StateHasChanged);
+            }
+        });
+        await Task.CompletedTask;
+    }
+}

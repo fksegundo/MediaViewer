@@ -1,0 +1,25 @@
+@page "/admin/login"
+@attribute [AllowAnonymous]
+@layout MainLayout
+
+<PageTitle>Login — MediaViewer</PageTitle>
+
+<div class="login-box">
+    <h1>MediaViewer Admin</h1>
+    @if (Error)
+    {
+        <p class="error">Usuário ou senha inválidos.</p>
+    }
+    <form method="post" action="/admin/signin">
+        <input type="text" name="username" placeholder="Usuário" required autofocus />
+        <input type="password" name="password" placeholder="Senha" required />
+        <button type="submit">Entrar</button>
+    </form>
+</div>
+
+@code {
+    [SupplyParameterFromQuery(Name = "error")]
+    public string? ErrorParam { get; set; }
+
+    private bool Error => ErrorParam is not null;
+}

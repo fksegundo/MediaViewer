@@ -1,0 +1,68 @@
+@page "/admin/media"
+@attribute [Authorize]
+@rendermode InteractiveServer
+@inject AppDbContext Db
+@inject NavigationManager Nav
+
+<PageTitle>Mídias — MediaViewer</PageTitle>
+
+<AdminNav />
+
+<div class="page-head">
+    <h1>Mídias</h1>
+    <a href="/admin/media/new" class="btn">+ Nova mídia</a>
+</div>
+
+<table class="grid">
+    <thead>
+        <tr><th>Título</th><th>Tipo</th><th>Ano</th><th>Fontes</th><th></th></tr>
+    </thead>
+    <tbody>
+        @foreach (var m in items)
+        {
+            <tr>
+                <td>@m.Title</td>
+                <td>@KindLabel(m)</td>
+                <td>@m.Year</td>
+                <td>@m.Sources.Count fonte(s)@(m.Kind == MediaKind.Series ? $", {m.Episodes.Count} episódio(s)" : "")</td>
+                <td>
+                    <a href="/admin/media/@m.Id">Editar</a>
+                    <button class="link-btn danger" @onclick="() => Delete(m.Id)">Excluir</button>
+                </td>
+            </tr>
+        }
+    </tbody>
+</table>
+
+@code {
+    private List<MediaItem> items = [];
+
+    protected override async Task OnInitializedAsync()
+    {
+        items = await Db.MediaItems
+            .Include(m => m.Sources)
+            .Include(m => m.Episodes)
+            .ThenInclude(e => e.Sources)
+            .Where(m => m.ParentId == null)
+            .OrderBy(m => m.Title)
+            .ToListAsync();
+    }
+
+    private static string KindLabel(MediaItem m) => m.Kind switch
+    {
+        MediaKind.Series => "Série",
+        MediaKind.Episode => "Episódio",
+        _ => "Filme"
+    };
+
+    private async Task Delete(int id)
+    {
+        var item = await Db.MediaItems.FindAsync(id);
+        if (item is not null)
+        {
+            Db.MediaItems.Remove(item);
+            await Db.SaveChangesAsync();
+            items.RemoveAll(m => m.Id == id);
+        }
+    }
+}

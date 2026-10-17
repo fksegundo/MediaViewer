@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="utf-8" ?>
+<ContentPage xmlns="http://schemas.microsoft.com/dotnet/2021/maui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2009/xaml"
+             xmlns:toolkit="clr-namespace:CommunityToolkit.Maui.Views;assembly=CommunityToolkit.Maui.MediaElement"
+             x:Class="MediaViewer.App.VideoPlayerPage"
+             NavigationPage.HasNavigationBar="False"
+             BackgroundColor="Black">
+    <Grid>
+        <toolkit:MediaElement x:Name="Player"
+                              ShouldAutoPlay="True"
+                              ShouldShowPlaybackControls="True"
+                              Aspect="AspectFit" />
+        <Button Text="&#8592; Voltar" Clicked="OnClose"
+                HorizontalOptions="Start" VerticalOptions="Start"
+                Margin="16,24,0,0" Padding="16,8"
+                BackgroundColor="#66000000" TextColor="White" />
+    </Grid>
+</ContentPage>

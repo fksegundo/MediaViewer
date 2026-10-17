@@ -1,0 +1,84 @@
+﻿@page "/"
+@inject AppSettings Settings
+@inject ApiClient Api
+@inject NavigationManager Nav
+
+@if (_catalog is null)
+{
+    <div class="loading">Carregando...</div>
+}
+else
+{
+    @if (_catalog.ContinueWatching.Count > 0)
+    {
+        <section class="row">
+            <h2>Continuar assistindo</h2>
+            <div class="hscroll">
+                @foreach (var m in _catalog.ContinueWatching)
+                {
+                    <MediaCard Item="m" OnClick="() => Open(m.Id)" />
+                }
+            </div>
+        </section>
+    }
+
+    @if (_catalog.Movies.Count > 0)
+    {
+        <section class="row">
+            <h2>Filmes</h2>
+            <div class="hscroll">
+                @foreach (var m in _catalog.Movies)
+                {
+                    <MediaCard Item="m" OnClick="() => Open(m.Id)" />
+                }
+            </div>
+        </section>
+    }
+
+    @if (_catalog.Series.Count > 0)
+    {
+        <section class="row">
+            <h2>Séries</h2>
+            <div class="hscroll">
+                @foreach (var m in _catalog.Series)
+                {
+                    <MediaCard Item="m" OnClick="() => Open(m.Id)" />
+                }
+            </div>
+        </section>
+    }
+
+    @if (_catalog.Movies.Count == 0 && _catalog.Series.Count == 0 && _catalog.ContinueWatching.Count == 0)
+    {
+        <p class="muted center">Nenhum conteúdo disponível ainda.</p>
+    }
+}
+
+@code {
+    private CatalogDto? _catalog;
+
+    protected override async Task OnInitializedAsync()
+    {
+        if (!Settings.IsPaired)
+        {
+            Nav.NavigateTo("/pair");
+            return;
+        }
+        if (Settings.ProfileId is null)
+        {
+            Nav.NavigateTo("/profiles");
+            return;
+        }
+
+        try
+        {
+            _catalog = await Api.GetCatalogAsync(Settings.ProfileId);
+        }
+        catch
+        {
+            _catalog = new CatalogDto([], [], []);
+        }
+    }
+
+    private void Open(int id) => Nav.NavigateTo($"/media/{id}");
+}

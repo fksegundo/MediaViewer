@@ -1,0 +1,609 @@
+@page "/admin/media/new"
+@page "/admin/media/{Id:int}"
+@attribute [Authorize]
+@rendermode InteractiveServer
+@inject AppDbContext Db
+@inject TmdbService Tmdb
+@inject MagnetInspectorService Magnet
+@inject NavigationManager Nav
+
+<PageTitle>@(Id is null ? "Nova mídia" : "Editar mídia") — MediaViewer</PageTitle>
+
+<AdminNav />
+
+<h1>@(Id is null ? "Nova mídia" : $"Editar: {item.Title}")</h1>
+
+@if (Tmdb.IsConfigured)
+{
+    <div class="tmdb-search">
+        <input @bind="tmdbQuery" placeholder="Buscar no TMDB..." @bind:event="oninput" />
+        <select @bind="tmdbType">
+            <option value="">Filme + Série</option>
+            <option value="movie">Filme</option>
+            <option value="tv">Série</option>
+        </select>
+        <button class="btn" @onclick="SearchTmdb">Buscar</button>
+    </div>
+
+    @if (tmdbResults.Count > 0)
+    {
+        <div class="tmdb-results">
+            @foreach (var r in tmdbResults)
+            {
+                <button type="button" class="tmdb-result" @onclick="() => ApplyTmdb(r)">
+                    @if (r.PosterUrl is not null) { <img src="@r.PosterUrl" alt="" /> }
+                    <span>@r.Title (@r.Year)</span>
+                </button>
+            }
+        </div>
+    }
+}
+
+<div class="form-grid">
+    <label>Título</label>
+    <input @bind="item.Title" />
+
+    <label>Tipo</label>
+    <select @bind="item.Kind">
+        <option value="@MediaKind.Movie">Filme</option>
+        <option value="@MediaKind.Series">Série</option>
+        <option value="@MediaKind.Episode" disabled="@(item.ParentId is null && Id is null)">Episódio</option>
+    </select>
+
+    <label>Ano</label>
+    <input type="number" @bind="item.Year" />
+
+    <label>Sinopse</label>
+    <textarea rows="4" @bind="item.Overview"></textarea>
+
+    <label>Poster (URL ou path TMDB)</label>
+    <input @bind="item.PosterPath" />
+
+    <label>Backdrop (URL ou path TMDB)</label>
+    <input @bind="item.BackdropPath" />
+
+    <label>Classificação</label>
+    <input @bind="item.ContentRating" placeholder="L, 10, 12..." />
+
+    <label>Ordem</label>
+    <input type="number" @bind="item.SortOrder" />
+</div>
+
+@if (item.Kind != MediaKind.Series)
+{
+    <h2>Fontes</h2>
+    <table class="grid">
+        <thead>
+            <tr><th>Magnet link ou URL direta</th><th>Arquivo #</th><th></th></tr>
+        </thead>
+        <tbody>
+            @foreach (var s in item.Sources)
+            {
+                <tr>
+                    <td>
+                        <input @bind="s.Uri" placeholder="magnet:?xt=... ou https://.../video.mp4" style="width:100%" />
+                        <label class="link-btn">ou .torrent
+                            <InputFile OnChange="e => LoadTorrentFile(e, s)" accept=".torrent" style="display:none" />
+                        </label>
+                    </td>
+                    <td><input type="number" @bind="s.FileIndex" placeholder="auto" style="width:5rem" /></td>
+                    <td><button class="link-btn danger" @onclick="() => item.Sources.Remove(s)">Remover</button></td>
+                </tr>
+            }
+        </tbody>
+    </table>
+    <button class="btn" @onclick="AddSource">+ Adicionar magnet</button>
+    @if (packError is not null) { <p class="error">@packError</p> }
+}
+
+@if (item.Kind == MediaKind.Series && Id is not null)
+{
+    <h2>Importar temporada (pack)</h2>
+    <div class="tmdb-search">
+        <input @bind="packMagnet" placeholder="magnet da temporada completa..." style="flex:1" />
+        <label class="btn" style="margin:0">.torrent
+            <InputFile OnChange="LoadPackTorrent" accept=".torrent" style="display:none" />
+        </label>
+        <input type="number" @bind="packSeason" min="1" style="width:6rem" title="Temporada" />
+        <button class="btn" @onclick="ListPackFiles" disabled="@packBusy">
+            @(packBusy ? "Lendo torrent..." : "Listar arquivos")
+        </button>
+        @if (item.TmdbId is not null)
+        {
+            <button class="btn" @onclick="() => FetchTmdbEpisodes()">Títulos TMDB</button>
+        }
+    </div>
+    @if (packError is not null) { <p class="error">@packError</p> }
+
+    @if (packFiles.Count > 0)
+    {
+        <table class="grid">
+            <thead><tr><th>Arquivo</th><th>Tamanho</th><th>Temp.</th><th>Episódio</th></tr></thead>
+            <tbody>
+                @foreach (var f in packFiles)
+                {
+                    <tr>
+                        <td>@f.Path</td>
+                        <td>@(f.Size / 1048576) MB</td>
+                        <td><input type="number" @bind="f.Season" min="1" placeholder="@packSeason" style="width:4rem" /></td>
+                        <td>
+                            <select @bind="f.Episode">
+                                <option value="">—</option>
+                                @for (var n = 1; n <= 200; n++) { <option value="@n">@n</option> }
+                            </select>
+                        </td>
+                    </tr>
+                }
+            </tbody>
+        </table>
+        <button class="btn primary" @onclick="ApplyPack">
+            Aplicar (@packFiles.Count(f => f.Episode is not null) mapeados)
+        </button>
+    }
+
+    <h2>Importar playlist (M3U)</h2>
+    <div class="tmdb-search">
+        <label class="btn" style="margin:0">.m3u
+            <InputFile OnChange="LoadM3u" accept=".m3u,.m3u8,.txt" style="display:none" />
+        </label>
+        <span>ou cole o conteúdo:</span>
+    </div>
+    <textarea @bind="m3uText" rows="4" placeholder="#EXTINF:-1 ... S01E01&#10;http://.../ep1.mp4" style="width:100%"></textarea>
+    <button class="btn" @onclick="ParseM3u">Ler playlist</button>
+
+    @if (m3uEntries.Count > 0)
+    {
+        <table class="grid">
+            <thead><tr><th>Nome</th><th>Temp.</th><th>Episódio</th><th>URL</th></tr></thead>
+            <tbody>
+                @foreach (var e in m3uEntries)
+                {
+                    <tr>
+                        <td>@e.Name</td>
+                        <td><input type="number" @bind="e.Season" min="1" placeholder="1" style="width:4rem" /></td>
+                        <td>
+                            <select @bind="e.Episode">
+                                <option value="">—</option>
+                                @for (var n = 1; n <= 200; n++) { <option value="@n">@n</option> }
+                            </select>
+                        </td>
+                        <td style="max-width:18rem;overflow:hidden;text-overflow:ellipsis">@e.Url</td>
+                    </tr>
+                }
+            </tbody>
+        </table>
+        <button class="btn primary" @onclick="ApplyM3u">
+            Aplicar (@m3uEntries.Count(e => e.Episode is not null) mapeados)
+        </button>
+    }
+
+    <h2>Episódios</h2>
+    <table class="grid">
+        <thead>
+            <tr><th>#</th><th>Título</th><th>Fontes</th><th></th></tr>
+        </thead>
+        <tbody>
+            @foreach (var ep in item.Episodes.OrderBy(e => e.SortOrder))
+            {
+                <tr>
+                    <td>@EpLabel(ep.SortOrder)</td>
+                    <td>@ep.Title</td>
+                    <td>@ep.Sources.Count</td>
+                    <td><a href="/admin/media/@ep.Id">Editar</a></td>
+                </tr>
+            }
+        </tbody>
+    </table>
+    <button class="btn" @onclick="AddEpisode">+ Novo episódio</button>
+}
+
+<div class="form-actions">
+    <button class="btn primary" @onclick="Save">Salvar</button>
+    <a href="/admin/media">Cancelar</a>
+    @if (saved) { <span class="ok">Salvo!</span> }
+</div>
+
+@code {
+    [Parameter] public int? Id { get; set; }
+    [SupplyParameterFromQuery(Name = "parent")]
+    public int? ParentIdParam { get; set; }
+
+    private MediaItem item = new() { Title = "", Kind = MediaKind.Movie };
+    private string tmdbQuery = "";
+    private string tmdbType = "";
+    private List<TmdbSearchResult> tmdbResults = [];
+    private bool saved;
+
+    protected override async Task OnInitializedAsync()
+    {
+        if (Id is not null)
+        {
+            item = await Db.MediaItems
+                .Include(m => m.Sources)
+                .Include(m => m.Episodes)
+                .ThenInclude(e => e.Sources)
+                .FirstAsync(m => m.Id == Id);
+        }
+        else if (ParentIdParam is not null)
+        {
+            item = new MediaItem
+            {
+                Title = "",
+                Kind = MediaKind.Episode,
+                ParentId = ParentIdParam,
+                SortOrder = await Db.MediaItems.CountAsync(m => m.ParentId == ParentIdParam) + 1
+            };
+        }
+    }
+
+    private async Task SearchTmdb()
+    {
+        tmdbResults = await Tmdb.SearchAsync(tmdbQuery);
+        if (tmdbType is not "")
+            tmdbResults = tmdbResults.Where(r => r.MediaType == tmdbType).ToList();
+    }
+
+    private void ApplyTmdb(TmdbSearchResult r)
+    {
+        item.TmdbId = r.TmdbId;
+        item.Title = r.Title;
+        item.Overview = r.Overview;
+        item.PosterPath = r.PosterUrl;
+        item.BackdropPath = r.BackdropUrl;
+        item.Year = r.Year;
+        item.Kind = r.MediaType == "tv" ? MediaKind.Series : MediaKind.Movie;
+        tmdbResults = [];
+    }
+
+    private void AddSource() => item.Sources.Add(new MediaSource { Uri = "" });
+
+    private async Task AddEpisode()
+    {
+        var ep = new MediaItem
+        {
+            Title = $"Episódio {item.Episodes.Count + 1}",
+            Kind = MediaKind.Episode,
+            ParentId = item.Id,
+            SortOrder = item.Episodes.Count + 1
+        };
+        Db.MediaItems.Add(ep);
+        await Db.SaveChangesAsync();
+        item.Episodes.Add(ep);
+    }
+
+    // ---------- Season pack import ----------
+
+    private sealed class PackFile
+    {
+        public int Index { get; init; }
+        public string Path { get; init; } = "";
+        public long Size { get; init; }
+        public int? Season { get; set; }
+        public int? Episode { get; set; }
+    }
+
+    private static readonly string[] VideoExts =
+        [".mp4", ".mkv", ".avi", ".webm", ".m4v", ".mov", ".mpg", ".mpeg"];
+
+    private string packMagnet = "";
+    private int packSeason = 1;
+    private bool packBusy;
+    private string? packError;
+    private List<PackFile> packFiles = [];
+    private Dictionary<int, TmdbEpisode> tmdbEps = [];
+
+    /// <summary>Converts an uploaded .torrent into a magnet URI for the source.</summary>
+    private async Task LoadTorrentFile(InputFileChangeEventArgs e, MediaSource source)
+    {
+        try
+        {
+            // InputFile streams are async-only — buffer before parsing.
+            var ms = new MemoryStream();
+            await e.File.OpenReadStream(maxAllowedSize: 8 * 1024 * 1024).CopyToAsync(ms);
+            ms.Position = 0;
+            var torrent = await MonoTorrent.Torrent.LoadAsync(ms);
+            source.Uri = TorrentToMagnet(torrent);
+        }
+        catch (Exception ex)
+        {
+            packError = $"Arquivo .torrent inválido: {ex.Message}";
+        }
+    }
+
+    /// <summary>A .torrent already carries metadata — file list is instant.</summary>
+    private async Task LoadPackTorrent(InputFileChangeEventArgs e)
+    {
+        packBusy = true;
+        packError = null;
+        try
+        {
+            // InputFile streams are async-only — buffer before parsing.
+            var ms = new MemoryStream();
+            await e.File.OpenReadStream(maxAllowedSize: 8 * 1024 * 1024).CopyToAsync(ms);
+            ms.Position = 0;
+            var torrent = await MonoTorrent.Torrent.LoadAsync(ms);
+            packMagnet = TorrentToMagnet(torrent);
+            packFiles = torrent.Files
+                .Where(f => VideoExts.Contains(Path.GetExtension(f.Path).ToLowerInvariant())
+                         && !f.Path.Contains("sample", StringComparison.OrdinalIgnoreCase)
+                         && !f.Path.Contains("trailer", StringComparison.OrdinalIgnoreCase))
+                .Select((f, _) =>
+                {
+                    var (s, e) = GuessSeasonEpisode(f.Path);
+                    return new PackFile
+                    {
+                        Index = torrent.Files.IndexOf(f), Path = f.Path, Size = f.Length,
+                        Season = s, Episode = e
+                    };
+                })
+                .ToList();
+            if (packFiles.Count == 0)
+                packError = "Nenhum arquivo de vídeo encontrado no torrent.";
+        }
+        catch (Exception ex)
+        {
+            packError = $"Arquivo .torrent inválido: {ex.Message}";
+        }
+        finally { packBusy = false; }
+    }
+
+    private static string TorrentToMagnet(MonoTorrent.Torrent t)
+    {
+        var trackers = t.AnnounceUrls.SelectMany(x => x).ToList();
+        return new MonoTorrent.MagnetLink(t.InfoHashes, t.Name, trackers).ToV1String();
+    }
+
+    private async Task ListPackFiles()
+    {
+        packBusy = true;
+        packError = null;
+        try
+        {
+            var files = await Magnet.GetFilesAsync(packMagnet);
+            packFiles = files
+                .Where(f => VideoExts.Contains(Path.GetExtension(f.Path).ToLowerInvariant())
+                         && !f.Path.Contains("sample", StringComparison.OrdinalIgnoreCase)
+                         && !f.Path.Contains("trailer", StringComparison.OrdinalIgnoreCase))
+                .Select(f =>
+                {
+                    var (s, e) = GuessSeasonEpisode(f.Path);
+                    return new PackFile
+                    {
+                        Index = f.Index, Path = f.Path, Size = f.Size,
+                        Season = s, Episode = e
+                    };
+                })
+                .ToList();
+            if (packFiles.Count == 0)
+                packError = "Nenhum arquivo de vídeo encontrado no torrent.";
+        }
+        catch (Exception ex) { packError = ex.Message; }
+        finally { packBusy = false; }
+    }
+
+    private async Task FetchTmdbEpisodes(int? season = null)
+    {
+        packError = null;
+        if (item.TmdbId is null)
+        {
+            packError = "Sem TMDB vinculado — use a busca no topo para vincular a série.";
+            return;
+        }
+        var s = season ?? packSeason;
+        try
+        {
+            var eps = await Tmdb.GetSeasonEpisodesAsync(item.TmdbId.Value, s);
+            foreach (var e in eps)
+                tmdbEps[EpKey(s, e.EpisodeNumber)] = e;
+            if (eps.Count == 0)
+                packError = $"Nenhum episódio encontrado na temporada {s}.";
+        }
+        catch (Exception ex) { packError = ex.Message; }
+    }
+
+    private async Task ApplyPack()
+    {
+        var mapped = packFiles.Where(f => f.Episode is not null).ToList();
+
+        // Se ainda não buscou o TMDB e a série está vinculada, busca todas as
+        // temporadas presentes no mapeamento.
+        if (item.TmdbId is not null)
+            foreach (var s in mapped.Select(f => f.Season ?? packSeason).Distinct())
+                await FetchTmdbEpisodes(s);
+
+        foreach (var f in mapped)
+        {
+            var epNum = f.Episode!.Value;
+            var season = f.Season ?? packSeason;
+            var key = EpKey(season, epNum);
+            var ep = item.Episodes.FirstOrDefault(e => e.SortOrder == key);
+            if (ep is null)
+            {
+                ep = new MediaItem
+                {
+                    Title = season is > 1 ? $"T{season} · E{epNum:00}" : $"Episódio {epNum}",
+                    Kind = MediaKind.Episode,
+                    ParentId = item.Id,
+                    SortOrder = key
+                };
+                Db.MediaItems.Add(ep);
+                item.Episodes.Add(ep);
+            }
+
+            if (tmdbEps.TryGetValue(key, out var t))
+            {
+                if (string.IsNullOrWhiteSpace(ep.Title) || ep.Title.StartsWith("Episódio"))
+                {
+                    ep.Title = t.Name;
+                    ep.Overview = t.Overview;
+                }
+                ep.PosterPath ??= t.StillUrl;
+            }
+
+            if (!ep.Sources.Any(s => s.Uri == packMagnet && s.FileIndex == f.Index))
+            {
+                var src = new MediaSource { Uri = packMagnet, FileIndex = f.Index, MediaItem = ep, Kind = SourceKind.Torrent };
+                Db.MediaSources.Add(src);
+                ep.Sources.Add(src);
+            }
+        }
+
+        await Db.SaveChangesAsync();
+        packFiles = [];
+        saved = true;
+    }
+
+    // ---------- M3U playlist import ----------
+
+    private sealed class M3uEntry
+    {
+        public string Name { get; init; } = "";
+        public string Url { get; init; } = "";
+        public int? Season { get; set; }
+        public int? Episode { get; set; }
+    }
+
+    private string m3uText = "";
+    private List<M3uEntry> m3uEntries = [];
+
+    private async Task LoadM3u(InputFileChangeEventArgs e)
+    {
+        try
+        {
+            using var reader = new StreamReader(e.File.OpenReadStream(4 * 1024 * 1024));
+            m3uText = await reader.ReadToEndAsync();
+            ParseM3u();
+        }
+        catch (Exception ex)
+        {
+            packError = $"Falha ao ler o arquivo: {ex.Message}";
+        }
+    }
+
+    private void ParseM3u()
+    {
+        packError = null;
+        m3uEntries.Clear();
+        string? name = null;
+        int? lastSeason = null, lastEp = null;
+        foreach (var raw in m3uText.Split('\n'))
+        {
+            var l = raw.Trim();
+            if (l.StartsWith("#EXTINF", StringComparison.OrdinalIgnoreCase))
+            {
+                var i = l.LastIndexOf(',');
+                name = i >= 0 ? l[(i + 1)..].Trim() : null;
+            }
+            else if (l.StartsWith("http", StringComparison.OrdinalIgnoreCase) && name is not null)
+            {
+                var (s, e) = GuessSeasonEpisode(name);
+                // Sem número no título: continua a sequência do anterior.
+                if (e is null && lastEp is not null) { e = lastEp + 1; s ??= lastSeason; }
+                m3uEntries.Add(new M3uEntry { Name = name, Url = l, Season = s, Episode = e });
+                if (e is not null) { lastEp = e; lastSeason = s ?? lastSeason; }
+                name = null;
+            }
+        }
+        if (m3uEntries.Count == 0)
+            packError = "Nenhuma entrada de mídia encontrada na playlist.";
+    }
+
+    private async Task ApplyM3u()
+    {
+        var mapped = m3uEntries.Where(x => x.Episode is not null).ToList();
+
+        if (item.TmdbId is not null)
+            foreach (var s in mapped.Select(x => x.Season ?? 1).Distinct())
+                await FetchTmdbEpisodes(s);
+
+        foreach (var e in mapped)
+        {
+            var epNum = e.Episode!.Value;
+            var season = e.Season ?? 1;
+            var key = EpKey(season, epNum);
+            var ep = item.Episodes.FirstOrDefault(x => x.SortOrder == key);
+            if (ep is null)
+            {
+                ep = new MediaItem
+                {
+                    Title = season is > 1 ? $"T{season} · E{epNum:00}" : $"Episódio {epNum}",
+                    Kind = MediaKind.Episode,
+                    ParentId = item.Id,
+                    SortOrder = key
+                };
+                Db.MediaItems.Add(ep);
+                item.Episodes.Add(ep);
+            }
+
+            if (tmdbEps.TryGetValue(key, out var t))
+            {
+                if (string.IsNullOrWhiteSpace(ep.Title) || ep.Title.StartsWith("Episódio"))
+                {
+                    ep.Title = t.Name;
+                    ep.Overview = t.Overview;
+                }
+                ep.PosterPath ??= t.StillUrl;
+            }
+
+            if (!ep.Sources.Any(s => s.Uri == e.Url))
+            {
+                var src = new MediaSource { Uri = e.Url, MediaItem = ep, Kind = SourceKind.Direct };
+                Db.MediaSources.Add(src);
+                ep.Sources.Add(src);
+            }
+        }
+
+        await Db.SaveChangesAsync();
+        m3uEntries = [];
+        saved = true;
+    }
+
+    /// <summary>Infers (season, episode) from common filename/title patterns.</summary>
+    private static (int? Season, int? Episode) GuessSeasonEpisode(string path)
+    {
+        var name = Path.GetFileNameWithoutExtension(path);
+        // S01E03 / s01e03 / S01.E03
+        var m = Regex.Match(name, @"[Ss](\d{1,2})[ ._-]?[Ee](\d{1,3})");
+        if (m.Success) return (int.Parse(m.Groups[1].Value), int.Parse(m.Groups[2].Value));
+        // 1x03
+        m = Regex.Match(name, @"\b(\d{1,2})x(\d{1,3})\b");
+        if (m.Success) return (int.Parse(m.Groups[1].Value), int.Parse(m.Groups[2].Value));
+        // Ep03 / Episode 03 / EP.03 — season unknown
+        m = Regex.Match(name, @"[Ee][Pp](?:isode)?[ ._-]?(\d{1,3})\b");
+        if (m.Success) return (null, int.Parse(m.Groups[1].Value));
+        // Number right before the extension/end: "Show - 03.mkv"
+        m = Regex.Match(name, @"[ ._-](\d{1,3})\s*$");
+        if (m.Success) return (null, int.Parse(m.Groups[1].Value));
+        return (null, null);
+    }
+
+    /// <summary>
+    /// Season-aware ordering key: season 1 keeps plain episode numbers
+    /// (1..N, compatible with existing data), higher seasons become 2001+, 3001+...
+    /// </summary>
+    private static int EpKey(int? season, int ep)
+        => season is > 1 ? season.Value * 1000 + ep : ep;
+
+    private static string EpLabel(int sortOrder)
+        => sortOrder >= 1000 ? $"T{sortOrder / 1000} · E{sortOrder % 1000}" : sortOrder.ToString();
+
+    private async Task Save()
+    {
+        foreach (var s in item.Sources.Where(s => s.Id == 0))
+            Db.MediaSources.Add(s);
+        foreach (var s in item.Sources)
+        {
+            s.MediaItem = item;
+            s.Kind = s.Uri.StartsWith("http", StringComparison.OrdinalIgnoreCase)
+                ? SourceKind.Direct : SourceKind.Torrent;
+        }
+
+        if (item.Id == 0)
+            Db.MediaItems.Add(item);
+
+        await Db.SaveChangesAsync();
+        saved = true;
+        if (Id is null)
+            Nav.NavigateTo($"/admin/media/{item.Id}", replace: true);
+    }
+}

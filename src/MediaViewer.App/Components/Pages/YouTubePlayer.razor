@@ -1,0 +1,15 @@
+@page "/yt/{VideoId}"
+@layout Layout.EmptyLayout
+@inject NavigationManager Nav
+
+<div class="yt-player">
+    <button class="back" @onclick='() => Nav.NavigateTo("/youtube")'>&larr; Voltar</button>
+    <iframe
+        src="https://www.youtube-nocookie.com/embed/@VideoId?autoplay=1&rel=0"
+        allow="autoplay; encrypted-media; picture-in-picture"
+        allowfullscreen></iframe>
+</div>
+
+@code {
+    [Parameter] public string VideoId { get; set; } = "";
+}
