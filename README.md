@@ -124,3 +124,11 @@ Documentos técnicos complementares disponíveis no diretório `/docs`:
 - [Mecanismo de Streaming P2P](docs/streaming-engine.md)
 - [Autenticação e Pareamento de Dispositivos](docs/security-and-pairing.md)
 - [Guia de Desenvolvimento e Contribuição](docs/development-guide.md)
+
+---
+
+## Licença & Isenção de Responsabilidade
+
+Este projeto é disponibilizado sob a licença [MIT](LICENSE).
+
+> **Aviso Legal**: O MediaViewer é uma ferramenta de software de reprodução e gerenciamento de mídia que utiliza tecnologias P2P/BitTorrent e APIs públicas (The Movie Database e YouTube). O projeto não hospeda, indexa nem distribui arquivos de mídia protegidos por direitos autorais. Os usuários são inteiramente responsáveis pela legalidade dos conteúdos que decidirem adicionar e reproduzir.
