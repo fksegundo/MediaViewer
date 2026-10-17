@@ -1,0 +1,31 @@
+@page "/admin"
+@attribute [Authorize]
+@rendermode InteractiveServer
+@inject AppDbContext Db
+
+<PageTitle>Admin — MediaViewer</PageTitle>
+
+<AdminNav />
+
+<h1>Painel</h1>
+
+<div class="stat-grid">
+    <div class="stat-card"><strong>@movies</strong><span>Filmes</span></div>
+    <div class="stat-card"><strong>@series</strong><span>Séries</span></div>
+    <div class="stat-card"><strong>@channels</strong><span>Canais YouTube</span></div>
+    <div class="stat-card"><strong>@profiles</strong><span>Perfis</span></div>
+    <div class="stat-card"><strong>@devices</strong><span>Dispositivos</span></div>
+</div>
+
+@code {
+    private int movies, series, channels, profiles, devices;
+
+    protected override async Task OnInitializedAsync()
+    {
+        movies = await Db.MediaItems.CountAsync(m => m.Kind == MediaKind.Movie);
+        series = await Db.MediaItems.CountAsync(m => m.Kind == MediaKind.Series);
+        channels = await Db.YouTubeChannels.CountAsync();
+        profiles = await Db.Profiles.CountAsync();
+        devices = await Db.DeviceTokens.CountAsync(d => !d.Revoked);
+    }
+}

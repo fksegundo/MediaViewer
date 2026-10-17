@@ -1,0 +1,61 @@
+@page "/downloads"
+@inject AppSettings Settings
+@inject NavigationManager Nav
+@inject DownloadStore Store
+@inject TorrentService Torrents
+
+<div class="downloads-page">
+    <h1>Baixados</h1>
+
+    @if (_items is null)
+    {
+        <div class="loading">Carregando...</div>
+    }
+    else if (_items.Count == 0)
+    {
+        <p class="muted center">Nada baixado ainda.</p>
+    }
+    else
+    {
+        <div class="dl-list">
+            @foreach (var d in _items)
+            {
+                <div class="dl-item">
+                    <button class="dl-play" @onclick="() => Play(d.SourceId)">
+                        @if (d.PosterUrl is not null)
+                        {
+                            <img src="@d.PosterUrl" alt="" />
+                        }
+                        <span>@d.Title</span>
+                    </button>
+                    <button class="btn-dl" @onclick="() => Remove(d)">✕</button>
+                </div>
+            }
+        </div>
+    }
+</div>
+
+@code {
+    private List<DownloadStore.Entry>? _items;
+
+    protected override async Task OnInitializedAsync()
+    {
+        if (!Settings.IsPaired)
+        {
+            Nav.NavigateTo("/pair");
+            return;
+        }
+        _items = (await Store.GetAllAsync()).ToList();
+    }
+
+    private void Play(int sourceId) => Nav.NavigateTo($"/player/local/{sourceId}");
+
+    private async Task Remove(DownloadStore.Entry entry)
+    {
+        var manager = Torrents.GetManager(entry.MagnetUri);
+        if (manager is not null)
+            await Torrents.RemoveAsync(manager, deleteData: true);
+        await Store.RemoveAsync(entry.SourceId);
+        _items = (await Store.GetAllAsync()).ToList();
+    }
+}

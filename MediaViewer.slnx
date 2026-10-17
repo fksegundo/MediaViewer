@@ -1,0 +1,8 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/MediaViewer.App/MediaViewer.App.csproj" />
+    <Project Path="src/MediaViewer.Server/MediaViewer.Server.csproj" />
+    <Project Path="src/MediaViewer.Shared/MediaViewer.Shared.csproj" />
+    <Project Path="src/MediaViewer.Streaming/MediaViewer.Streaming.csproj" />
+  </Folder>
+</Solution>

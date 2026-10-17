@@ -1,0 +1,72 @@
+@page "/admin/devices"
+@attribute [Authorize]
+@rendermode InteractiveServer
+@inject AppDbContext Db
+
+<PageTitle>Dispositivos — MediaViewer</PageTitle>
+
+<AdminNav />
+
+<h1>Dispositivos pareados</h1>
+
+<button class="btn" @onclick="GenerateCode">Gerar código de pareamento</button>
+@if (pairingCode is not null)
+{
+    <p class="pairing-code">
+        Código: <strong>@pairingCode</strong>
+        <small>(válido por 15 minutos)</small>
+    </p>
+}
+
+<table class="grid">
+    <thead>
+        <tr><th>Dispositivo</th><th>Pareado em</th><th>Status</th><th></th></tr>
+    </thead>
+    <tbody>
+        @foreach (var d in devices)
+        {
+            <tr>
+                <td>@d.DeviceName</td>
+                <td>@d.CreatedAt.ToLocalTime().ToString("dd/MM/yyyy HH:mm")</td>
+                <td>@(d.Revoked ? "Revogado" : "Ativo")</td>
+                <td>
+                    @if (!d.Revoked)
+                    {
+                        <button class="link-btn danger" @onclick="() => Revoke(d.Id)">Revogar</button>
+                    }
+                </td>
+            </tr>
+        }
+    </tbody>
+</table>
+
+@code {
+    private List<DeviceToken> devices = [];
+    private string? pairingCode;
+
+    protected override async Task OnInitializedAsync()
+    {
+        devices = await Db.DeviceTokens.OrderByDescending(d => d.CreatedAt).ToListAsync();
+    }
+
+    private async Task GenerateCode()
+    {
+        pairingCode = Random.Shared.Next(100000, 999999).ToString();
+        Db.PairingCodes.Add(new PairingCode
+        {
+            Code = pairingCode,
+            ExpiresAt = DateTime.UtcNow.AddMinutes(15)
+        });
+        await Db.SaveChangesAsync();
+    }
+
+    private async Task Revoke(int id)
+    {
+        var d = await Db.DeviceTokens.FindAsync(id);
+        if (d is not null)
+        {
+            d.Revoked = true;
+            await Db.SaveChangesAsync();
+        }
+    }
+}

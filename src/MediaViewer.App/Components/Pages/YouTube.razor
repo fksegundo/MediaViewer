@@ -1,0 +1,56 @@
+@page "/youtube"
+@inject AppSettings Settings
+@inject ApiClient Api
+@inject NavigationManager Nav
+
+<div class="yt-page">
+    <h1>YouTube</h1>
+
+    @if (_feed is null)
+    {
+        <div class="loading">Carregando...</div>
+    }
+    else if (_feed.Count == 0)
+    {
+        <p class="muted center">Nenhum vídeo disponível. Peça para um adulto adicionar canais.</p>
+    }
+    else
+    {
+        <div class="yt-grid">
+            @foreach (var v in _feed)
+            {
+                <button class="yt-card" @onclick="() => Open(v.VideoId)">
+                    @if (v.ThumbnailUrl is not null)
+                    {
+                        <img src="@v.ThumbnailUrl" alt="@v.Title" loading="lazy" />
+                    }
+                    <span class="yt-title">@v.Title</span>
+                    <span class="yt-channel">@v.ChannelName</span>
+                </button>
+            }
+        </div>
+    }
+</div>
+
+@code {
+    private List<YouTubeVideoDto>? _feed;
+
+    protected override async Task OnInitializedAsync()
+    {
+        if (!Settings.IsPaired)
+        {
+            Nav.NavigateTo("/pair");
+            return;
+        }
+        try
+        {
+            _feed = await Api.GetYouTubeFeedAsync();
+        }
+        catch
+        {
+            _feed = [];
+        }
+    }
+
+    private void Open(string videoId) => Nav.NavigateTo($"/yt/{videoId}");
+}

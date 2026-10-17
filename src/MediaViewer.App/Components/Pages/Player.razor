@@ -1,0 +1,119 @@
+@page "/player/torrent/{SourceId:int}"
+@page "/player/local/{SourceId:int}"
+@inject NavigationManager Nav
+@inject TorrentService Torrents
+@inject DownloadStore Downloads
+@implements IAsyncDisposable
+
+<div class="player-page">
+    @if (_error is not null)
+    {
+        <p class="error">@_error</p>
+        <pre class="error-stack" style="white-space:pre-wrap;font-size:0.7rem;max-height:60vh;overflow:auto">@_errorDetail</pre>
+        <button class="btn-secondary" @onclick='() => Nav.NavigateTo("/")'>Voltar</button>
+    }
+    else
+    {
+        <div class="loading">Preparando vídeo... (@_status)</div>
+    }
+</div>
+
+@code {
+    [Parameter] public int SourceId { get; set; }
+    [SupplyParameterFromQuery] public string? Magnet { get; set; }
+    [SupplyParameterFromQuery] public int? FileIndex { get; set; }
+    [SupplyParameterFromQuery] public int? MediaId { get; set; }
+
+    private string? _error;
+    private string? _errorDetail;
+    private string _status = "";
+    private int? _mediaId;
+    private TorrentStreamHandle? _handle;
+    private readonly CancellationTokenSource _cts = new();
+
+    protected override async Task OnInitializedAsync()
+    {
+        // Downloaded files are played through the torrent engine's local HTTP
+        // server too — Android WebView blocks file:// subresources, while
+        // http://127.0.0.1 is treated as a trustworthy origin. The pieces are
+        // already on disk, so no network is needed (metadata reloads from the
+        // engine's magnet cache).
+        var local = await Downloads.FindAsync(SourceId);
+        var magnet = local?.MagnetUri ?? Magnet;
+        var fileIndex = local?.FileIndex ?? FileIndex;
+        _mediaId = MediaId ?? local?.MediaItemId;
+
+        if (magnet is null)
+        {
+            _error = "Fonte do vídeo não informada.";
+            return;
+        }
+
+        _status = local is not null ? "abrindo vídeo baixado" : "conectando ao torrent";
+
+        // URIs http(s) são links diretos de mídia — sem engine de torrent.
+        if (magnet.StartsWith("http", StringComparison.OrdinalIgnoreCase))
+        {
+            var direct = local is not null ? local.LocalPath : magnet;
+            await MainThread.InvokeOnMainThreadAsync(() =>
+                Application.Current!.Windows[0].Page!.Navigation.PushModalAsync(
+                    new VideoPlayerPage(direct, null, _mediaId)));
+            Nav.NavigateTo(_mediaId is not null ? $"/media/{_mediaId}" : "/");
+            return;
+        }
+
+        _ = PollStatusAsync(magnet);
+
+        try
+        {
+            _handle = await Torrents.GetStreamAsync(magnet, fileIndex, _cts.Token);
+
+            // O Chromium do WebView não toca MKV — abre o player nativo
+            // (MediaElement/ExoPlayer), que assume a posse do stream.
+            var handle = _handle;
+            _handle = null;
+            await MainThread.InvokeOnMainThreadAsync(() =>
+                Application.Current!.Windows[0].Page!.Navigation.PushModalAsync(
+                    new VideoPlayerPage(handle.PlaybackUri, handle, _mediaId)));
+            Nav.NavigateTo(_mediaId is not null ? $"/media/{_mediaId}" : "/");
+        }
+        catch (OperationCanceledException)
+        {
+            // Usuário saiu da página antes do vídeo ficar pronto.
+        }
+        catch (Exception ex)
+        {
+            _error = $"Falha ao iniciar o vídeo: {ex.Message}";
+            _errorDetail = ex.ToString();
+#if ANDROID
+            Android.Util.Log.Error("MediaViewer", $"[Player] {ex}");
+#endif
+        }
+    }
+
+    /// <summary>Mostra seeds/conexões ao vivo enquanto o torrent prepara.</summary>
+    private async Task PollStatusAsync(string magnet)
+    {
+        while (_error is null && !_cts.IsCancellationRequested)
+        {
+            try { await Task.Delay(1500, _cts.Token); }
+            catch { break; }
+            var m = Torrents.GetManager(magnet);
+            if (m is not null)
+            {
+                var tr = m.TrackerManager.Tiers.SelectMany(t => t.Trackers).FirstOrDefault();
+                var trInfo = tr is null ? "" :
+                    $" | tracker: {tr.Status}{(string.IsNullOrEmpty(tr.FailureMessage) ? "" : " — " + tr.FailureMessage)}";
+                _status = $"{m.OpenConnections} conexões · {m.Peers.Seeds} seeds{trInfo}";
+                await InvokeAsync(StateHasChanged);
+            }
+        }
+    }
+
+    public async ValueTask DisposeAsync()
+    {
+        _cts.Cancel();
+        if (_handle is not null)
+            await _handle.DisposeAsync();
+    }
+}

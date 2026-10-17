@@ -1,0 +1,16 @@
+<button class="media-card" @onclick="OnClick">
+    @if (Item.PosterUrl is not null)
+    {
+        <img src="@Item.PosterUrl" alt="@Item.Title" loading="lazy" />
+    }
+    else
+    {
+        <div class="poster-placeholder">@Item.Title</div>
+    }
+    <span class="title">@Item.Title</span>
+</button>
+
+@code {
+    [Parameter] public required MediaItemDto Item { get; set; }
+    [Parameter] public EventCallback OnClick { get; set; }
+}

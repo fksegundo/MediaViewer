@@ -1,0 +1,117 @@
+@page "/admin/youtube"
+@attribute [Authorize]
+@rendermode InteractiveServer
+@inject AppDbContext Db
+@inject YouTubeService Yt
+@inject IServiceScopeFactory ScopeFactory
+
+<PageTitle>YouTube — MediaViewer</PageTitle>
+
+<AdminNav />
+
+<h1>Canais permitidos</h1>
+
+@if (!Yt.IsConfigured)
+{
+    <p class="error">YouTube:ApiKey não configurada em appsettings.json.</p>
+}
+
+<div class="add-row">
+    <input @bind="channelInput" placeholder="URL do canal ou @@handle" style="flex:1" />
+    <button class="btn" @onclick="AddChannel" disabled="@busy">Adicionar</button>
+</div>
+@if (message is not null) { <p class="error">@message</p> }
+
+<table class="grid">
+    <thead>
+        <tr><th></th><th>Canal</th><th>Vídeos</th><th></th></tr>
+    </thead>
+    <tbody>
+        @foreach (var c in channels)
+        {
+            <tr>
+                <td>@if (c.ThumbnailUrl is not null) { <img src="@c.ThumbnailUrl" class="thumb" alt="" /> }</td>
+                <td>@c.Name</td>
+                <td>@c.Videos.Count</td>
+                <td><button class="link-btn danger" @onclick="() => Remove(c.Id)">Remover</button></td>
+            </tr>
+        }
+    </tbody>
+</table>
+
+<button class="btn" @onclick="RefreshFeed" disabled="@busy">Atualizar feed agora</button>
+
+@code {
+    private List<YouTubeChannel> channels = [];
+    private string channelInput = "";
+    private string? message;
+    private bool busy;
+
+    protected override async Task OnInitializedAsync()
+    {
+        channels = await Db.YouTubeChannels.Include(c => c.Videos).ToListAsync();
+    }
+
+    private async Task AddChannel()
+    {
+        busy = true;
+        message = null;
+        try
+        {
+            var resolved = await Yt.ResolveChannelAsync(channelInput);
+            if (resolved is null)
+            {
+                message = "Canal não encontrado. Use a URL do canal ou @handle.";
+                return;
+            }
+            if (channels.Any(c => c.ChannelId == resolved.ChannelId))
+            {
+                message = "Canal já cadastrado.";
+                return;
+            }
+
+            var channel = new YouTubeChannel
+            {
+                ChannelId = resolved.ChannelId,
+                Name = resolved.Name,
+                ThumbnailUrl = resolved.ThumbnailUrl,
+                UploadsPlaylistId = resolved.UploadsPlaylistId
+            };
+            Db.YouTubeChannels.Add(channel);
+            await Db.SaveChangesAsync();
+            channels.Add(channel);
+            channelInput = "";
+        }
+        finally
+        {
+            busy = false;
+        }
+    }
+
+    private async Task Remove(int id)
+    {
+        var channel = await Db.YouTubeChannels.FindAsync(id);
+        if (channel is not null)
+        {
+            Db.YouTubeChannels.Remove(channel);
+            await Db.SaveChangesAsync();
+            channels.RemoveAll(c => c.Id == id);
+        }
+    }
+
+    private async Task RefreshFeed()
+    {
+        busy = true;
+        try
+        {
+            await using var scope = ScopeFactory.CreateAsyncScope();
+            var feed = scope.ServiceProvider.GetRequiredService<YouTubeFeedService>();
+            await feed.RefreshAsync();
+            channels = await Db.YouTubeChannels.Include(c => c.Videos).ToListAsync();
+        }
+        finally
+        {
+            busy = false;
+        }
+    }
+}

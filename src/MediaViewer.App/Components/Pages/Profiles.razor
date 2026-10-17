@@ -1,0 +1,58 @@
+@page "/profiles"
+@layout Layout.EmptyLayout
+@inject AppSettings Settings
+@inject ApiClient Api
+@inject NavigationManager Nav
+
+<div class="profiles-page">
+    <h1>Quem está assistindo?</h1>
+
+    @if (_profiles is null)
+    {
+        <p class="muted">Carregando...</p>
+    }
+    else if (_profiles.Count == 0)
+    {
+        <p class="muted">Nenhum perfil configurado.</p>
+    }
+    else
+    {
+        <div class="profile-grid">
+            @foreach (var p in _profiles)
+            {
+                <button class="profile-card" @onclick="() => Select(p)">
+                    <span class="avatar" style="background-color: @p.AvatarColor">@p.Name[..1].ToUpperInvariant()</span>
+                    <span class="name">@p.Name</span>
+                </button>
+            }
+        </div>
+    }
+</div>
+
+@code {
+    private List<ProfileDto>? _profiles;
+
+    protected override async Task OnInitializedAsync()
+    {
+        if (!Settings.IsPaired)
+        {
+            Nav.NavigateTo("/pair");
+            return;
+        }
+        try
+        {
+            _profiles = await Api.GetProfilesAsync();
+        }
+        catch
+        {
+            _profiles = [];
+        }
+    }
+
+    private void Select(ProfileDto p)
+    {
+        Settings.ProfileId = p.Id;
+        Settings.ProfileName = p.Name;
+        Nav.NavigateTo("/");
+    }
+}

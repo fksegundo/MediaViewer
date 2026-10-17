@@ -1,0 +1,71 @@
+@page "/pair"
+@layout Layout.EmptyLayout
+@inject AppSettings Settings
+@inject ApiClient Api
+@inject NavigationManager Nav
+
+<div class="pair-page">
+    <h1>MediaViewer</h1>
+    <p class="muted">Peça para um adulto configurar este aparelho.</p>
+
+    <div class="pair-form">
+        <label>Servidor</label>
+        <input @bind="_serverUrl" placeholder="http://192.168.x.x:8080" inputmode="url" />
+
+        <label>Código</label>
+        <input @bind="_code" placeholder="000000" inputmode="numeric" maxlength="8" />
+
+        @if (_error is not null)
+        {
+            <p class="error">@_error</p>
+        }
+
+        <button class="btn-primary" @onclick="PairAsync" disabled="@_busy">
+            @(_busy ? "Conectando..." : "Conectar")
+        </button>
+    </div>
+</div>
+
+@code {
+    private string _serverUrl = "";
+    private string _code = "";
+    private string? _error;
+    private bool _busy;
+
+    protected override void OnInitialized()
+    {
+        _serverUrl = Settings.ServerUrl ?? "";
+    }
+
+    private async Task PairAsync()
+    {
+        _error = null;
+        if (string.IsNullOrWhiteSpace(_serverUrl) || string.IsNullOrWhiteSpace(_code))
+        {
+            _error = "Preencha o servidor e o código.";
+            return;
+        }
+
+        _busy = true;
+        try
+        {
+            Settings.ServerUrl = _serverUrl;
+            var token = await Api.PairAsync(_code.Trim(), DeviceInfo.Name);
+            if (token is null)
+            {
+                _error = "Código inválido ou expirado.";
+                return;
+            }
+            Settings.DeviceToken = token;
+            Nav.NavigateTo("/profiles");
+        }
+        catch (Exception)
+        {
+            _error = "Não consegui conectar ao servidor. Confira o endereço.";
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
+}
